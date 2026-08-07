@@ -1,7 +1,3 @@
-# Real-time vehicle tracking overlay using YOLOv8 and ByteTrack
-# Captures the screen, detects vehicles, and draws tracking boxes directly on top
-# Supports Car, SUV, Bike, Truck, Bus with speed estimation in km/h
-
 import tkinter as tk
 from tkinter import messagebox
 import threading, time
@@ -11,7 +7,6 @@ import torch
 from ultralytics import YOLO
 from collections import defaultdict, deque
 
-# Model and detection settings
 MODEL    = "yolov8n.pt"
 CONF     = 0.22
 CLASSES  = [2, 3, 5, 7]  # car, motorcycle, bus, truck
@@ -23,7 +18,7 @@ SPD_WIN  = 18
 DISP_MS  = 33
 MAX_EX   = 0.22
 
-# Color scheme for each vehicle type and UI elements
+# har vehicle type ka alag color rakha h maine
 C = {
     "Car":"#00FF41", "SUV":"#88FFAA", "Bike":"#00CFFF",
     "Truck":"#FF9900", "Bus":"#FF4444",
@@ -33,17 +28,15 @@ C = {
 
 
 def classify(cls_id, bw, bh):
-    # Map COCO class ID and bounding box shape to a readable vehicle type
     if cls_id == 3: return "Bike"
     if cls_id == 5: return "Bus"
     if cls_id == 7: return "Truck"
-    # Distinguish Car vs SUV using height-to-width aspect ratio
+    # agar height/width ratio > 0.65 ho to SUV warna Car
     return "SUV" if bh / max(bw, 1) > 0.65 else "Car"
 
 
 class VelPred:
-    # Predicts where a vehicle box will be between detection frames
-    # using its measured pixel velocity, so boxes stay on the vehicle
+    # detection frames ke beech box ko smooth rakhne ke liye pixel velocity se predict karta h
     def __init__(self, box, t):
         self.b = np.array(box, dtype=float)
         self.v = np.zeros(4)
@@ -63,7 +56,7 @@ class VelPred:
 
 
 class State:
-    # Shared memory between detection thread and rendering thread
+    # detection thread aur render thread ke beech shared data yha store hota h
     def __init__(self):
         self._l = threading.Lock()
         self.tracks = []
@@ -80,7 +73,6 @@ class State:
 
 
 class DetThread(threading.Thread):
-    # Runs YOLO + ByteTrack in background, writes results to State
     def __init__(self, state: State):
         super().__init__(daemon=True)
         self.state  = state
@@ -101,7 +93,6 @@ class DetThread(threading.Thread):
             img   = self.sct.grab(self.mon)
             frame = np.array(img)[:, :, :3]
 
-            # Run detection and tracking in a single call using ByteTrack
             results = self.model.track(
                 frame, persist=True, verbose=False,
                 conf=CONF, classes=CLASSES, imgsz=IMGSZ,
@@ -129,7 +120,6 @@ class DetThread(threading.Thread):
                     self.trajs[tid].append((cx, cy))
                     self.tpts[tid].append(now)
 
-                    # Estimate speed using pixel displacement over time
                     spd  = 0.0
                     traj = self.trajs[tid]
                     tps  = self.tpts[tid]
@@ -146,7 +136,7 @@ class DetThread(threading.Thread):
                             spd = (px / ppm / dt) * 3.6
 
                     prev = self.spds.get(tid, spd)
-                    # Ignore sudden jumps that are likely noise
+                    # agar speed zyada jump kare to ignore karo, noise hoga
                     if abs(spd - prev) > 60:
                         spd = prev
                     spd = prev + SPD_GAIN * (spd - prev)
@@ -168,7 +158,6 @@ class DetThread(threading.Thread):
 
 
 class Overlay:
-    # Transparent fullscreen tkinter window that draws tracking boxes on screen
     def __init__(self, root: tk.Tk, state: State):
         self.root    = root
         self.state   = state
@@ -191,7 +180,7 @@ class Overlay:
         self._loop()
 
     def _draw_box(self, x1, y1, x2, y2, col):
-        # Draw a corner-bracket style box instead of a plain rectangle
+        # seedha rectangle nahi, corner bracket wala look diya h
         L = min(20, max(8, int((x2-x1) * 0.18)))
         self.cv.create_rectangle(x1, y1, x2, y2, outline=col, width=1)
         corners = [
@@ -210,7 +199,6 @@ class Overlay:
         tracks, fps = self.state.get()
         now = time.perf_counter()
 
-        # Update or create a velocity predictor for each active track
         seen = set()
         for t in tracks:
             tid = t["id"]; seen.add(tid)
@@ -231,7 +219,7 @@ class Overlay:
             col = C.get(t["type"], C["Car"])
             x1, y1, x2, y2 = pred.get(now)
 
-            # Draw motion trail with a fading gradient effect
+            # trail draw karo, fade hoti jaaye pehle se baad mein
             trail = t["trail"]; n = len(trail)
             for i in range(1, n):
                 f  = i / n
@@ -245,7 +233,6 @@ class Overlay:
 
             self._draw_box(x1, y1, x2, y2, col)
 
-            # Label showing vehicle type and speed
             spd = t["speed"]
             lbl = (f" {t['type']}  {spd:.0f} km/h "
                    if spd > 2.0 else f" {t['type']} #{tid} ")
@@ -259,7 +246,7 @@ class Overlay:
                                 text=lbl, fill=C["spd"],
                                 font=("Consolas", 10, "bold"))
 
-        # HUD panel showing live stats
+        # HUD panel upar left mein
         hx, hy, hw, hh = 16, 16, 285, 118
         self.cv.create_rectangle(hx, hy, hx+hw, hy+hh,
                                  fill=C["hud"], outline=C["acc"], width=1)
@@ -279,7 +266,7 @@ class Overlay:
                             text="[Esc] to quit",
                             fill=C["dim"], font=("Consolas", 8))
 
-        # Colour legend for vehicle types
+        # vehicle types ka color legend
         lx2 = hx + hw + 12
         ly2 = hy
         for lbl, col in [("Car",  C["Car"]),  ("SUV",  C["SUV"]),
@@ -300,7 +287,6 @@ class Overlay:
 
 
 def main():
-    # Show a confirmation dialog before starting
     ask = tk.Tk(); ask.withdraw()
     ok  = messagebox.askyesno(
         "Vehicle Tracker",
